@@ -6,20 +6,8 @@ import numpy as np
 from PIL import Image
 import argparse
 import pandas as pd
-from torchvision.transforms import Resize
-from torchvision import transforms
-import torch.nn.functional as F
-from torchmetrics.multimodal import CLIPScore
-from torchmetrics.image import PeakSignalNoiseRatio, StructuralSimilarityIndexMeasure
-from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
-from torchmetrics.regression import MeanSquaredError
-from urllib.request import urlretrieve 
-import open_clip
-import hpsv2
-import ImageReward as RM
-import math
-from transformers import AutoProcessor, AutoModel
 from diffusers import FluxFillPipeline
+from client_metrics import MetricsCalculator
 
 def rle2mask(mask_rle, shape): # height, width
     starts, lengths = [np.asarray(x, dtype=int) for x in (mask_rle[0:][::2], mask_rle[1:][::2])]
@@ -29,116 +17,6 @@ def rle2mask(mask_rle, shape): # height, width
     for lo, hi in zip(starts, ends):
         binary_mask[lo:hi] = 1
     return binary_mask.reshape(shape)
-
-class MetricsCalculator:
-    def __init__(self, device,ckpt_path="data/ckpt") -> None:
-        self.device=device
-        # clip
-        self.clip_metric_calculator = CLIPScore(model_name_or_path="openai/clip-vit-large-patch14").to(device)
-        # lpips
-        self.lpips_metric_calculator = LearnedPerceptualImagePatchSimilarity(net_type='squeeze').to(device)
-        # aesthetic model
-        self.aesthetic_model = torch.nn.Linear(768, 1)
-        aesthetic_model_url = (
-                    "https://github.com/LAION-AI/aesthetic-predictor/blob/main/sa_0_4_vit_l_14_linear.pth?raw=true"
-                )
-        aesthetic_model_ckpt_path=os.path.join(ckpt_path,"sa_0_4_vit_l_14_linear.pth")
-        if not os.path.exists(ckpt_path):
-             os.makedirs(ckpt_path)
-        if not os.path.exists(aesthetic_model_ckpt_path):
-            urlretrieve(aesthetic_model_url, aesthetic_model_ckpt_path)
-        self.aesthetic_model.load_state_dict(torch.load(aesthetic_model_ckpt_path))
-        self.aesthetic_model.eval()
-        self.clip_model, _, self.clip_preprocess = open_clip.create_model_and_transforms('ViT-L-14', pretrained='openai')
-        # image reward model
-        self.imagereward_model = RM.load("ImageReward-v1.0")
- 
-
-    def calculate_image_reward(self,image,prompt):
-        reward = self.imagereward_model.score(prompt, [image])
-        return reward
-
-    def calculate_hpsv21_score(self,image,prompt):
-        result = hpsv2.score(image, prompt, hps_version="v2.1")[0]
-        return result.item()
-
-    def calculate_aesthetic_score(self,img):
-        image = self.clip_preprocess(img).unsqueeze(0)
-        with torch.no_grad():
-            image_features = self.clip_model.encode_image(image)
-            image_features /= image_features.norm(dim=-1, keepdim=True)
-            prediction = self.aesthetic_model(image_features)
-        return prediction.cpu().item()
-
-    def calculate_clip_similarity(self, img, txt):
-        img = np.array(img)
-        
-        img_tensor=torch.tensor(img).permute(2,0,1).to(self.device)
-        
-        score = self.clip_metric_calculator(img_tensor, txt)
-        score = score.cpu().item()
-        
-        return score
-    
-    def calculate_psnr(self, img_pred, img_gt, mask=None):
-        img_pred = np.array(img_pred).astype(np.float32)/255.
-        img_gt = np.array(img_gt).astype(np.float32)/255.
-
-        assert img_pred.shape == img_gt.shape, "Image shapes should be the same."
-        if mask is not None:
-            mask = np.array(mask).astype(np.float32)
-            img_pred = img_pred * mask
-            img_gt = img_gt * mask
-        
-        difference = img_pred - img_gt
-        difference_square = difference ** 2
-        difference_square_sum = difference_square.sum()
-        difference_size = mask.sum()
-
-        mse = difference_square_sum/difference_size
-
-        if mse < 1.0e-10:
-            return 1000
-        PIXEL_MAX = 1
-        return 20 * math.log10(PIXEL_MAX / math.sqrt(mse))
-
-    
-    def calculate_lpips(self, img_gt, img_pred, mask=None):
-        img_pred = np.array(img_pred).astype(np.float32)/255
-        img_gt = np.array(img_gt).astype(np.float32)/255.
-        assert img_pred.shape == img_gt.shape, "Image shapes should be the same."
-
-        if mask is not None:
-            mask = np.array(mask).astype(np.float32)
-            img_pred = img_pred * mask 
-            img_gt = img_gt * mask
-            
-        img_pred_tensor=torch.tensor(img_pred).permute(2,0,1).unsqueeze(0).to(self.device)
-        img_gt_tensor=torch.tensor(img_gt).permute(2,0,1).unsqueeze(0).to(self.device)
-            
-        score =  self.lpips_metric_calculator(img_pred_tensor*2-1,img_gt_tensor*2-1)
-        score = score.cpu().item()
-        
-        return score
-    
-    def calculate_mse(self, img_pred, img_gt, mask=None):
-        img_pred = np.array(img_pred).astype(np.float32)/255.
-        img_gt = np.array(img_gt).astype(np.float32)/255.
-
-        assert img_pred.shape == img_gt.shape, "Image shapes should be the same."
-        if mask is not None:
-            mask = np.array(mask).astype(np.float32)
-            img_pred = img_pred * mask
-            img_gt = img_gt * mask
-        
-        difference = img_pred - img_gt
-        difference_square = difference ** 2
-        difference_square_sum = difference_square.sum()
-        difference_size = mask.sum()
-
-        mse = difference_square_sum/difference_size
-
-        return mse.item()
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--model_path', 
@@ -157,6 +35,7 @@ parser.add_argument('--mask_key',
                     type=str, 
                     default="inpainting_mask")
 parser.add_argument('--blended', action='store_true')
+parser.add_argument('--server_url', type=str, default="http://localhost:8000")
 
 args = parser.parse_args()
 
@@ -232,7 +111,7 @@ for key, item in mapping_file.items():
 # evaluation
 evaluation_df = pd.DataFrame(columns=['Image ID','Image Reward', 'HPS V2.1', 'Aesthetic Score', 'PSNR', 'LPIPS', 'MSE', 'CLIP Similarity'])
 
-metrics_calculator=MetricsCalculator(device)
+metrics_calculator=MetricsCalculator(device, server_url=args.server_url)
 
 for key, item in mapping_file.items():
     print(f"evaluating image {key} ...")
