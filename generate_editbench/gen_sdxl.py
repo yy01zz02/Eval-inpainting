@@ -51,19 +51,11 @@ for idx, row in df.iterrows():
         save_path = os.path.join(args.output_dir, save_name)
         if os.path.exists(save_path): continue
             
-        orig_image = Image.open(orig_path).convert("RGB")
-        masked_image_input = Image.open(masked_path).convert("RGB")
+        # Force resize to 1024x1024
+        orig_image = Image.open(orig_path).convert("RGB").resize((1024, 1024))
+        masked_image_input = Image.open(masked_path).convert("RGB").resize((1024, 1024))
         
-        if orig_image.size != masked_image_input.size:
-            masked_image_input = masked_image_input.resize(orig_image.size)
-            
-        width, height = orig_image.size
-        width = (width // 8) * 8
-        height = (height // 8) * 8
-        
-        if orig_image.size != (width, height):
-            orig_image = orig_image.resize((width, height))
-            masked_image_input = masked_image_input.resize((width, height))
+        width, height = 1024, 1024
 
         mask_image = compute_mask(orig_image, masked_image_input)
         

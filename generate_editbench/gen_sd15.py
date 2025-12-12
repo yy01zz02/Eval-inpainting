@@ -13,15 +13,9 @@ def compute_mask(original_image, masked_image):
     masked = np.array(masked_image)
     
     # Compute difference
-    # Assuming the 'removed' parts are different (e.g. black, grey, or noise)
-    # compared to the original.
-    # If the user provides "original with mask removed", it usually means the hole is black.
-    # But checking difference with original is robust.
     diff = np.abs(orig.astype(int) - masked.astype(int))
     mask = np.any(diff > 10, axis=2).astype(np.uint8) * 255
     
-    # Post-process mask (fill holes, dilate) if needed, but raw diff is usually fine 
-    # if the hole is clean.
     return Image.fromarray(mask).convert("RGB")
 
 parser = argparse.ArgumentParser()
@@ -29,10 +23,9 @@ parser.add_argument('--model_path', type=str, default="/home/admin/workspace/aop
 parser.add_argument('--csv_path', type=str, required=True, help="Path to the CSV file")
 parser.add_argument('--dataset_root', type=str, required=True, help="Root directory of the dataset")
 parser.add_argument('--output_dir', type=str, default="results/sd15")
-# CSV Columns
-parser.add_argument('--col_image', type=str, default="image_path", help="Column name for original image filename/path")
-parser.add_argument('--col_masked', type=str, default="masked_image_path", help="Column name for masked image filename/path")
-parser.add_argument('--col_prompt', type=str, default="prompt", help="Column name for prompt")
+parser.add_argument('--col_image', type=str, default="image_path")
+parser.add_argument('--col_masked', type=str, default="masked_image_path")
+parser.add_argument('--col_prompt', type=str, default="prompt")
 
 args = parser.parse_args()
 
@@ -61,7 +54,6 @@ for idx, row in df.iterrows():
         masked_path = os.path.join(args.dataset_root, masked_name)
         
         if not os.path.exists(orig_path) or not os.path.exists(masked_path):
-            print(f"Missing files for {img_name}. Skipping.")
             continue
             
         save_name = os.path.basename(img_name)
@@ -71,35 +63,21 @@ for idx, row in df.iterrows():
             print(f"Exists: {save_name}")
             continue
             
-        # Load Images
-        orig_image = Image.open(orig_path).convert("RGB")
-        masked_image_input = Image.open(masked_path).convert("RGB")
+        # Load Images and Force Resize to 1024x1024
+        orig_image = Image.open(orig_path).convert("RGB").resize((1024, 1024))
+        masked_image_input = Image.open(masked_path).convert("RGB").resize((1024, 1024))
         
-        # Ensure sizes match
-        if orig_image.size != masked_image_input.size:
-            masked_image_input = masked_image_input.resize(orig_image.size)
-            
-        width, height = orig_image.size
-        # Align to 8
-        width = (width // 8) * 8
-        height = (height // 8) * 8
-        
-        if orig_image.size != (width, height):
-            orig_image = orig_image.resize((width, height))
-            masked_image_input = masked_image_input.resize((width, height))
+        width, height = 1024, 1024
 
-        # Compute Mask
+        # Compute Mask from resized images
         mask_image = compute_mask(orig_image, masked_image_input)
         
         print(f"Generating {save_name} ({width}x{height})...")
         
         # Inpainting
-        # Note: 'image' in pipe is usually the original image which the pipeline uses reference from.
-        # 'mask_image' defines where to paint.
-        # SD1.5 Inpaint expects 'image' and 'mask_image'.
         result = pipe(
             prompt=prompt,
-            image=orig_image, # Use original as base
+            image=orig_image, 
             mask_image=mask_image,
             height=height,
             width=width,
