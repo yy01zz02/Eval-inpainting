@@ -5,9 +5,7 @@ import os
 import numpy as np
 from PIL import Image
 import argparse
-import pandas as pd
 from diffusers import StableDiffusionInpaintPipeline
-from client_metrics import MetricsCalculator
 
 def rle2mask(mask_rle, shape): # height, width
     starts, lengths = [np.asarray(x, dtype=int) for x in (mask_rle[0:][::2], mask_rle[1:][::2])]
@@ -35,7 +33,6 @@ parser.add_argument('--mask_key',
                     type=str, 
                     default="inpainting_mask")
 parser.add_argument('--blended', action='store_true')
-parser.add_argument('--server_url', type=str, default="http://localhost:8000")
 
 args = parser.parse_args()
 
@@ -55,8 +52,8 @@ except Exception as e:
 with open(args.mapping_file,"r") as f:
     mapping_file=json.load(f)
 
+print(f"Generating images to {args.image_save_path}...")
 for key, item in mapping_file.items():
-    print(f"generating image {key} ...")
     image_path=item["image"]
     mask=item[args.mask_key]
     caption=item["caption"]
@@ -74,9 +71,10 @@ for key, item in mapping_file.items():
     masked_image_save_path=save_path.replace(".jpg","_masked.jpg")
 
     if os.path.exists(save_path) and os.path.exists(masked_image_save_path):
-        print(f"image {key} exitst! skip...")
+        print(f"image {key} exists! skip...")
         continue
-
+    
+    print(f"Generating {key}...")
     kwargs = {
         "prompt": caption,
         "image": init_image,
@@ -108,60 +106,4 @@ for key, item in mapping_file.items():
     image.save(save_path)
     init_image.save(masked_image_save_path)
 
-# evaluation
-evaluation_df = pd.DataFrame(columns=['Image ID','Image Reward', 'HPS V2.1', 'Aesthetic Score', 'PSNR', 'LPIPS', 'MSE', 'CLIP Similarity'])
-
-metrics_calculator=MetricsCalculator(device, server_url=args.server_url)
-
-for key, item in mapping_file.items():
-    print(f"evaluating image {key} ...")
-    image_path=item["image"]
-    mask=item[args.mask_key]
-    prompt=item["caption"]
-
-    src_image_path = os.path.join(args.base_dir, image_path)
-    src_image = Image.open(src_image_path).resize((512,512))
-
-    tgt_image_path=os.path.join(args.image_save_path, image_path)
-    tgt_image = Image.open(tgt_image_path).resize((512,512))
-
-    evaluation_result=[key]
-        
-    mask = rle2mask(mask,(512,512))
-    mask = 1 - mask[:,:,np.newaxis]
-
-    for metric in evaluation_df.columns.values.tolist()[1:]:
-        print(f"evluating metric: {metric}")
-
-        if metric == 'Image Reward':
-            metric_result = metrics_calculator.calculate_image_reward(tgt_image,prompt)
-            
-        if metric == 'HPS V2.1':
-            metric_result = metrics_calculator.calculate_hpsv21_score(tgt_image,prompt)
-        
-        if metric == 'Aesthetic Score':
-            metric_result = metrics_calculator.calculate_aesthetic_score(tgt_image)
-        
-        if metric == 'PSNR':
-            metric_result = metrics_calculator.calculate_psnr(src_image, tgt_image, mask)
-        
-        if metric == 'LPIPS':
-            metric_result = metrics_calculator.calculate_lpips(src_image, tgt_image, mask)
-        
-        if metric == 'MSE':
-            metric_result = metrics_calculator.calculate_mse(src_image, tgt_image, mask)
-        
-        if metric == 'CLIP Similarity':
-            metric_result = metrics_calculator.calculate_clip_similarity(tgt_image, prompt)
-
-        evaluation_result.append(metric_result)
-    
-    evaluation_df.loc[len(evaluation_df.index)] = evaluation_result
-
-print("The averaged evaluation result:")
-averaged_results=evaluation_df.mean(numeric_only=True)
-print(averaged_results)
-averaged_results.to_csv(os.path.join(args.image_save_path,"evaluation_result_sum.csv"))
-evaluation_df.to_csv(os.path.join(args.image_save_path,"evaluation_result.csv"))
-
-print(f"The generated images and evaluation results is saved in {args.image_save_path}")
+print("Generation complete.")

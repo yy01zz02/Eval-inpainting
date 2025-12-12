@@ -7,10 +7,20 @@ from PIL import Image
 import math
 from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 
+# Define base URLs for services
+URLS = {
+    "clip": "http://localhost:8001/score",
+    "aesthetic": "http://localhost:8002/score",
+    "pickscore": "http://localhost:8003/score",
+    "hpsv2": "http://localhost:8004/score",
+    "imagereward": "http://localhost:8005/score",
+    "hpsv3": "http://localhost:8006/score",
+}
+
 class MetricsCalculator:
-    def __init__(self, device, ckpt_path=None, server_url="http://localhost:8000") -> None:
+    def __init__(self, device, server_urls=URLS) -> None:
         self.device = device
-        self.server_url = server_url
+        self.server_urls = server_urls
         # lpips (keep local)
         self.lpips_metric_calculator = LearnedPerceptualImagePatchSimilarity(net_type='squeeze').to(device)
 
@@ -20,53 +30,43 @@ class MetricsCalculator:
             image = Image.fromarray(image)
         # Check if it's already PIL
         if not isinstance(image, Image.Image):
-             # Try converting assuming it's a tensor or other compatible type
-             # For this script, inputs are likely PIL or numpy
+             # Try converting assuming it's a tensor
              pass
         
         buffered = BytesIO()
         image.save(buffered, format="PNG") 
         return base64.b64encode(buffered.getvalue()).decode('utf-8')
 
-    def calculate_image_reward(self, image, prompt):
+    def _call_service(self, metric_name, payload):
+        url = self.server_urls.get(metric_name)
+        if not url:
+            print(f"URL for {metric_name} not configured.")
+            return 0.0
         try:
-            img_str = self._encode_image(image)
-            resp = requests.post(f"{self.server_url}/score/image_reward", json={"image_base64": img_str, "prompt": prompt})
+            resp = requests.post(url, json=payload)
             resp.raise_for_status()
             return resp.json()['score']
         except Exception as e:
-            print(f"Error calculating ImageReward: {e}")
+            print(f"Error calculating {metric_name}: {e}")
             return 0.0
+
+    def calculate_image_reward(self, image, prompt):
+        return self._call_service("imagereward", {"image_base64": self._encode_image(image), "prompt": prompt})
 
     def calculate_hpsv21_score(self, image, prompt):
-        try:
-            img_str = self._encode_image(image)
-            resp = requests.post(f"{self.server_url}/score/hpsv2", json={"image_base64": img_str, "prompt": prompt})
-            resp.raise_for_status()
-            return resp.json()['score']
-        except Exception as e:
-            print(f"Error calculating HPSv2: {e}")
-            return 0.0
+        return self._call_service("hpsv2", {"image_base64": self._encode_image(image), "prompt": prompt})
 
     def calculate_aesthetic_score(self, img):
-        try:
-            img_str = self._encode_image(img)
-            resp = requests.post(f"{self.server_url}/score/aesthetic", json={"image_base64": img_str})
-            resp.raise_for_status()
-            return resp.json()['score']
-        except Exception as e:
-            print(f"Error calculating Aesthetic Score: {e}")
-            return 0.0
+        return self._call_service("aesthetic", {"image_base64": self._encode_image(img)})
 
     def calculate_clip_similarity(self, img, txt):
-        try:
-            img_str = self._encode_image(img)
-            resp = requests.post(f"{self.server_url}/score/clip", json={"image_base64": img_str, "prompt": txt})
-            resp.raise_for_status()
-            return resp.json()['score']
-        except Exception as e:
-            print(f"Error calculating CLIP Score: {e}")
-            return 0.0
+        return self._call_service("clip", {"image_base64": self._encode_image(img), "prompt": txt})
+    
+    def calculate_pick_score(self, img, txt):
+        return self._call_service("pickscore", {"image_base64": self._encode_image(img), "prompt": txt})
+
+    def calculate_hpsv3_score(self, img, txt):
+        return self._call_service("hpsv3", {"image_base64": self._encode_image(img), "prompt": txt})
     
     def calculate_psnr(self, img_pred, img_gt, mask=None):
         img_pred = np.array(img_pred).astype(np.float32)/255.
