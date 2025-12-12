@@ -7,25 +7,13 @@ import argparse
 import pandas as pd
 from diffusers import StableDiffusionInpaintPipeline
 
-def compute_mask(original_image, masked_image):
-    # Convert to numpy
-    orig = np.array(original_image)
-    masked = np.array(masked_image)
-    
-    # Compute difference
-    diff = np.abs(orig.astype(int) - masked.astype(int))
-    mask = np.any(diff > 10, axis=2).astype(np.uint8) * 255
-    
-    return Image.fromarray(mask).convert("RGB")
-
 parser = argparse.ArgumentParser()
 parser.add_argument('--model_path', type=str, default="/home/admin/workspace/aop_lab/app_data/.cache/models--stable-diffusion-v1-5--stable-diffusion-inpainting/snapshots/8a4288a76071f7280aedbdb3253bdb9e9d5d84bb")
-parser.add_argument('--csv_path', type=str, required=True, help="Path to the CSV file")
-parser.add_argument('--dataset_root', type=str, required=True, help="Root directory of the dataset")
+parser.add_argument('--csv_path', type=str, required=True, help="Path to annotations_*.csv")
+parser.add_argument('--image_folder', type=str, required=True, help="Folder containing reference images (e.g. references_generated)")
+parser.add_argument('--mask_folder', type=str, required=True, help="Folder containing masks (e.g. masks_generated)")
 parser.add_argument('--output_dir', type=str, default="results/sd15")
-parser.add_argument('--col_image', type=str, default="image_path")
-parser.add_argument('--col_masked', type=str, default="masked_image_path")
-parser.add_argument('--col_prompt', type=str, default="prompt")
+parser.add_argument('--prompt_col', type=str, default="prompt_mask-rich", help="Column name for prompt (e.g. prompt_mask-rich)")
 
 args = parser.parse_args()
 
@@ -34,8 +22,12 @@ print(f"Running on {device}")
 
 # Load Model
 print(f"Loading SD 1.5 from {args.model_path}")
-pipe = StableDiffusionInpaintPipeline.from_pretrained(args.model_path, torch_dtype=torch.float16)
-pipe.to(device)
+try:
+    pipe = StableDiffusionInpaintPipeline.from_pretrained(args.model_path, torch_dtype=torch.float16)
+    pipe.to(device)
+except Exception as e:
+    print(f"Error loading model: {e}")
+    exit(1)
 
 # Load CSV
 df = pd.read_csv(args.csv_path)
@@ -45,39 +37,42 @@ os.makedirs(args.output_dir, exist_ok=True)
 
 for idx, row in df.iterrows():
     try:
-        img_name = row[args.col_image]
-        masked_name = row[args.col_masked]
-        prompt = row[args.col_prompt]
+        aos_id = row['aos']
+        prompt = row[args.prompt_col]
         
-        # Construct full paths
-        orig_path = os.path.join(args.dataset_root, img_name)
-        masked_path = os.path.join(args.dataset_root, masked_name)
+        # Construct filenames
+        img_name = f"{aos_id}.png"
         
-        if not os.path.exists(orig_path) or not os.path.exists(masked_path):
+        img_path = os.path.join(args.image_folder, img_name)
+        mask_path = os.path.join(args.mask_folder, img_name)
+        
+        if not os.path.exists(img_path):
+            print(f"Image not found: {img_path}")
+            continue
+        if not os.path.exists(mask_path):
+            print(f"Mask not found: {mask_path}")
             continue
             
-        save_name = os.path.basename(img_name)
-        save_path = os.path.join(args.output_dir, save_name)
-        
+        save_path = os.path.join(args.output_dir, img_name)
         if os.path.exists(save_path):
-            print(f"Exists: {save_name}")
+            print(f"Exists: {img_name}")
             continue
             
-        # Load Images and Force Resize to 1024x1024
-        orig_image = Image.open(orig_path).convert("RGB").resize((1024, 1024))
-        masked_image_input = Image.open(masked_path).convert("RGB").resize((1024, 1024))
+        # Load and Resize
+        # EditBench images are PNG.
+        # Force resize to 1024x1024 as requested
+        orig_image = Image.open(img_path).convert("RGB").resize((1024, 1024))
+        # Mask is binary, convert to L (grayscale)
+        mask_image = Image.open(mask_path).convert("L").resize((1024, 1024))
         
         width, height = 1024, 1024
-
-        # Compute Mask from resized images
-        mask_image = compute_mask(orig_image, masked_image_input)
         
-        print(f"Generating {save_name} ({width}x{height})...")
+        print(f"Generating {img_name} with prompt: '{prompt[:30]}...'")
         
-        # Inpainting
+        # Inference
         result = pipe(
             prompt=prompt,
-            image=orig_image, 
+            image=orig_image,
             mask_image=mask_image,
             height=height,
             width=width,
@@ -87,6 +82,6 @@ for idx, row in df.iterrows():
         result.save(save_path)
         
     except Exception as e:
-        print(f"Error processing row {idx}: {e}")
+        print(f"Error processing row {idx} ({row.get('aos', 'unknown')}): {e}")
 
 print("Done.")

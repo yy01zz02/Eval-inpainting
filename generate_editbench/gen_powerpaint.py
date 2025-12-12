@@ -7,21 +7,13 @@ import argparse
 import pandas as pd
 from diffusers import StableDiffusionInpaintPipeline
 
-def compute_mask(original_image, masked_image):
-    orig = np.array(original_image)
-    masked = np.array(masked_image)
-    diff = np.abs(orig.astype(int) - masked.astype(int))
-    mask = np.any(diff > 10, axis=2).astype(np.uint8) * 255
-    return Image.fromarray(mask).convert("RGB")
-
 parser = argparse.ArgumentParser()
 parser.add_argument('--model_path', type=str, default="/home/admin/workspace/aop_lab/app_data/.cache/models--JunhaoZhuang--PowerPaint-v2-1/snapshots/5ae2be3ac38b162df209b7ad5de036d339081e33")
 parser.add_argument('--csv_path', type=str, required=True)
-parser.add_argument('--dataset_root', type=str, required=True)
+parser.add_argument('--image_folder', type=str, required=True)
+parser.add_argument('--mask_folder', type=str, required=True)
 parser.add_argument('--output_dir', type=str, default="results/powerpaint")
-parser.add_argument('--col_image', type=str, default="image_path")
-parser.add_argument('--col_masked', type=str, default="masked_image_path")
-parser.add_argument('--col_prompt', type=str, default="prompt")
+parser.add_argument('--prompt_col', type=str, default="prompt_mask-rich")
 
 args = parser.parse_args()
 
@@ -37,29 +29,26 @@ os.makedirs(args.output_dir, exist_ok=True)
 
 for idx, row in df.iterrows():
     try:
-        img_name = row[args.col_image]
-        masked_name = row[args.col_masked]
-        prompt = row[args.col_prompt]
+        aos_id = row['aos']
+        prompt = row[args.prompt_col]
         
-        orig_path = os.path.join(args.dataset_root, img_name)
-        masked_path = os.path.join(args.dataset_root, masked_name)
+        img_name = f"{aos_id}.png"
+        img_path = os.path.join(args.image_folder, img_name)
+        mask_path = os.path.join(args.mask_folder, img_name)
         
-        if not os.path.exists(orig_path) or not os.path.exists(masked_path):
+        if not os.path.exists(img_path) or not os.path.exists(mask_path):
             continue
             
-        save_name = os.path.basename(img_name)
-        save_path = os.path.join(args.output_dir, save_name)
+        save_path = os.path.join(args.output_dir, img_name)
         if os.path.exists(save_path): continue
             
-        # Force resize to 1024x1024
-        orig_image = Image.open(orig_path).convert("RGB").resize((1024, 1024))
-        masked_image_input = Image.open(masked_path).convert("RGB").resize((1024, 1024))
+        # Resize to 1024x1024
+        orig_image = Image.open(img_path).convert("RGB").resize((1024, 1024))
+        mask_image = Image.open(mask_path).convert("L").resize((1024, 1024))
         
         width, height = 1024, 1024
-
-        mask_image = compute_mask(orig_image, masked_image_input)
         
-        print(f"Generating {save_name} ({width}x{height})...")
+        print(f"Generating {img_name}...")
         
         result = pipe(
             prompt=prompt,
