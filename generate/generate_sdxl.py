@@ -22,13 +22,13 @@ parser.add_argument('--model_path',
                     default="/home/admin/workspace/aop_lab/app_data/.cache/models--diffusers--stable-diffusion-xl-1.0-inpainting-0.1/snapshots/115134f363124c53c7d878647567d04daf26e41e")
 parser.add_argument('--image_save_path', 
                     type=str, 
-                    default="/home/admin/workspace/aop_lab/app_source/zhoupeng/PaintGRPO/dataset/brushbench/sdxl_inpainting/inside")
+                    default="runs/evaluation_result/BrushBench/sdxl_inpainting/inside")
 parser.add_argument('--mapping_file', 
                     type=str, 
-                    default="/home/admin/workspace/aop_lab/app_source/zhoupeng/PaintGRPO/dataset/brushbench/mapping_file.json")
+                    default="data/BrushBench/mapping_file.json")
 parser.add_argument('--base_dir', 
                     type=str, 
-                    default="/home/admin/workspace/aop_lab/app_source/zhoupeng/PaintGRPO/dataset/brushbench")
+                    default="data/BrushBench")
 parser.add_argument('--mask_key', 
                     type=str, 
                     default="inpainting_mask")
@@ -36,9 +36,7 @@ parser.add_argument('--blended', action='store_true')
 
 args = parser.parse_args()
 
-# Set device to cuda:2
-device = "cuda:2" if torch.cuda.is_available() else "cpu"
-print(f"Running on device: {device}")
+device = "cuda" if torch.cuda.is_available() else "cpu"
 
 print(f"Loading SDXL Inpainting model from {args.model_path}")
 try:
@@ -108,6 +106,4 @@ for key, item in mapping_file.items():
     image.save(save_path)
     init_image.save(masked_image_save_path)
 
-print("Generation complete. Releasing model...")
-del pipe
-torch.cuda.empty_cache()
+print("Generation complete.")

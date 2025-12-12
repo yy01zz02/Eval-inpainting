@@ -22,13 +22,13 @@ parser.add_argument('--model_path',
                     default="/home/admin/workspace/aop_lab/app_data/.cache/models--stable-diffusion-v1-5--stable-diffusion-inpainting/snapshots/8a4288a76071f7280aedbdb3253bdb9e9d5d84bb")
 parser.add_argument('--image_save_path', 
                     type=str, 
-                    default="runs/evaluation_result/BrushBench/sd15_inpainting/inside")
+                    default="/home/admin/workspace/aop_lab/app_source/zhoupeng/PaintGRPO/dataset/brushbench/sd15_inpainting/inside")
 parser.add_argument('--mapping_file', 
                     type=str, 
-                    default="data/BrushBench/mapping_file.json")
+                    default="/home/admin/workspace/aop_lab/app_source/zhoupeng/PaintGRPO/dataset/brushbench/mapping_file.json")
 parser.add_argument('--base_dir', 
                     type=str, 
-                    default="data/BrushBench")
+                    default="/home/admin/workspace/aop_lab/app_source/zhoupeng/PaintGRPO/dataset/brushbench")
 parser.add_argument('--mask_key', 
                     type=str, 
                     default="inpainting_mask")
@@ -36,7 +36,9 @@ parser.add_argument('--blended', action='store_true')
 
 args = parser.parse_args()
 
-device = "cuda" if torch.cuda.is_available() else "cpu"
+# Set device to cuda:2
+device = "cuda:2" if torch.cuda.is_available() else "cpu"
+print(f"Running on device: {device}")
 
 print(f"Loading SD 1.5 Inpainting model from {args.model_path}")
 try:
@@ -65,6 +67,7 @@ for key, item in mapping_file.items():
     init_image = Image.fromarray(init_image).convert("RGB")
     mask_image = Image.fromarray(mask_image.repeat(3,-1)*255).convert("RGB")
 
+    # Generator also needs to be on correct device if possible, usually passed to pipeline
     generator = torch.Generator(device).manual_seed(1234)
 
     save_path= os.path.join(args.image_save_path,image_path) 
@@ -106,4 +109,6 @@ for key, item in mapping_file.items():
     image.save(save_path)
     init_image.save(masked_image_save_path)
 
-print("Generation complete.")
+print("Generation complete. Releasing model...")
+del pipe
+torch.cuda.empty_cache()

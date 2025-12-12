@@ -22,13 +22,13 @@ parser.add_argument('--model_path',
                     default="/home/admin/workspace/aop_lab/app_data/.cache/models--JunhaoZhuang--PowerPaint-v2-1/snapshots/5ae2be3ac38b162df209b7ad5de036d339081e33")
 parser.add_argument('--image_save_path', 
                     type=str, 
-                    default="runs/evaluation_result/BrushBench/powerpaint/inside")
+                    default="/home/admin/workspace/aop_lab/app_source/zhoupeng/PaintGRPO/dataset/brushbench/powerpaint/inside")
 parser.add_argument('--mapping_file', 
                     type=str, 
-                    default="data/BrushBench/mapping_file.json")
+                    default="/home/admin/workspace/aop_lab/app_source/zhoupeng/PaintGRPO/dataset/brushbench/mapping_file.json")
 parser.add_argument('--base_dir', 
                     type=str, 
-                    default="data/BrushBench")
+                    default="/home/admin/workspace/aop_lab/app_source/zhoupeng/PaintGRPO/dataset/brushbench")
 parser.add_argument('--mask_key', 
                     type=str, 
                     default="inpainting_mask")
@@ -36,7 +36,9 @@ parser.add_argument('--blended', action='store_true')
 
 args = parser.parse_args()
 
-device = "cuda" if torch.cuda.is_available() else "cpu"
+# Set device to cuda:2
+device = "cuda:2" if torch.cuda.is_available() else "cpu"
+print(f"Running on device: {device}")
 
 print(f"Loading PowerPaint v2.1 model from {args.model_path}")
 try:
@@ -106,4 +108,6 @@ for key, item in mapping_file.items():
     image.save(save_path)
     init_image.save(masked_image_save_path)
 
-print("Generation complete.")
+print("Generation complete. Releasing model...")
+del pipe
+torch.cuda.empty_cache()

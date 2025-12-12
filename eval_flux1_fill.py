@@ -22,13 +22,13 @@ parser.add_argument('--model_path',
                     default="/home/admin/workspace/aop_lab/app_data/.cache/models--black-forest-labs--FLUX.1-Fill-dev/snapshots/6d92c296315be5f54318a6d2659f11465339f934")
 parser.add_argument('--image_save_path', 
                     type=str, 
-                    default="runs/evaluation_result/BrushBench/flux1_fill/inside")
+                    default="/home/admin/workspace/aop_lab/app_source/zhoupeng/PaintGRPO/dataset/brushbench/flux1_fill/inside")
 parser.add_argument('--mapping_file', 
                     type=str, 
-                    default="data/BrushBench/mapping_file.json")
+                    default="/home/admin/workspace/aop_lab/app_source/zhoupeng/PaintGRPO/dataset/brushbench/mapping_file.json")
 parser.add_argument('--base_dir', 
                     type=str, 
-                    default="data/BrushBench")
+                    default="/home/admin/workspace/aop_lab/app_source/zhoupeng/PaintGRPO/dataset/brushbench")
 parser.add_argument('--mask_key', 
                     type=str, 
                     default="inpainting_mask")
@@ -36,7 +36,9 @@ parser.add_argument('--blended', action='store_true')
 
 args = parser.parse_args()
 
-device = "cuda" if torch.cuda.is_available() else "cpu"
+# Set device to cuda:2
+device = "cuda:2" if torch.cuda.is_available() else "cpu"
+print(f"Running on device: {device}")
 
 print(f"Loading Flux.1 Fill model from {args.model_path}")
 try:
@@ -44,7 +46,12 @@ try:
         args.model_path, 
         torch_dtype=torch.bfloat16
     )
-    pipe.enable_model_cpu_offload()
+    # enable_model_cpu_offload automatically handles device placement for submodules
+    # but we should ensure the initial load respects CUDA visible devices or manually move parts if needed.
+    # Usually offload is fine. 
+    # To force specific GPU, we can set device_map=device in from_pretrained if supported or env var.
+    # But pipe.enable_model_cpu_offload(device=device) is the way.
+    pipe.enable_model_cpu_offload(device=device)
 except Exception as e:
     print(f"Error loading model: {e}")
     exit(1)
@@ -106,4 +113,6 @@ for key, item in mapping_file.items():
     image.save(save_path)
     init_image.save(masked_image_save_path)
 
-print("Generation complete.")
+print("Generation complete. Releasing model...")
+del pipe
+torch.cuda.empty_cache()
